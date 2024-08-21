@@ -305,16 +305,24 @@ if uploaded_files:
         for file, date in filtered_file_dates:
             df = pd.read_excel(file)
             try:
-                dates.append(date)
-                power = df.iloc[32]['Unnamed: 3'] + df.iloc[33]['Unnamed: 3']
-                power_values.append(power)
+                if pd.notna(df.iloc[32]['Unnamed: 3']) and pd.notna(df.iloc[33]['Unnamed: 3']):
+                    power_32 = df.iloc[32]['Unnamed: 3']
+                    power_33 = df.iloc[33]['Unnamed: 3']
+                    if isinstance(power_32, (int, float)) and isinstance(power_33, (int, float)):
+                        dates.append(date)
+                        power = power_32 + power_33
+                        power_values.append(power)
+                    else:
+                        st.write(f"**:red[File {file.name} has non-numeric values in required cells.]**")
+                else:
+                    st.write(f"**:red[File {file.name} has missing values in required cells.]**")
             except (KeyError, IndexError) as e:
-                st.write(f"Error processing file {file}: {e}")
+                st.write(f"**:red[Error processing file {file.name}: {e}]**")
 
         dates = pd.to_datetime(dates)
 
         if len(dates) == 0:
-            st.error(f"No data available for the selected period. Please select a different period.")
+            st.write("**:red[No data available for the selected period. Please select a different period.]**")
         else:
             power_series = pd.Series(power_values, index=dates)
 
@@ -345,6 +353,7 @@ if uploaded_files:
             st.plotly_chart(fig)
 
         power_sum = power_series.sum()
+
 
         if 0 <= power_sum <= 951700:
             discount = 13
