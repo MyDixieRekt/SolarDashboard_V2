@@ -85,15 +85,20 @@ for file in uploaded_files:
 
 file_dates = natsorted(file_dates, key=lambda x: x[1])
 
-years = sorted(set(pd.to_datetime(date).year for _, date in file_dates))
-years.insert(0, "All")
+dates = [pd.to_datetime(date) for _, date in file_dates]
+years = sorted(set(date.year for date in dates))
+months = list(range(1, 13))
 
-selected_year = st.selectbox("Select Year", years)
+start_year = st.selectbox("Select Start Year", years)
+start_month = st.selectbox("Select Start Month", months)
+end_year = st.selectbox("Select End Year", years, index=len(years)-1)
+end_month = st.selectbox("Select End Month", months, index=11)
 
-if selected_year == "All":
-    filtered_file_dates = file_dates
-else:
-    filtered_file_dates = [(file, date) for file, date in file_dates if pd.to_datetime(date).year == selected_year]
+start_date = pd.Timestamp(year=start_year, month=start_month, day=1)
+end_date = pd.Timestamp(year=end_year, month=end_month, day=1) + pd.offsets.MonthEnd(0)
+
+filtered_file_dates = [(file, date) for file, date in file_dates if start_date <= pd.to_datetime(date) <= end_date]
+
 
 total_peak = 0
 total_off_peak = 0
@@ -294,68 +299,50 @@ if uploaded_files:
     if selected_option == "Discount Forecasting":
         st.title("Discount Forecasting")
 
-        start_month = st.selectbox("Select Start Month", range(1, 13), index=0)
-        end_month = st.selectbox("Select End Month", range(1, 13), index=11)
+        dates = []
+        power_values = []  
 
-        if end_month < start_month:
-            st.error("End month must be after start month.")
+        for file, date in filtered_file_dates:
+            df = pd.read_excel(file)
+            try:
+                dates.append(date)
+                power = df.iloc[32]['Unnamed: 3'] + df.iloc[33]['Unnamed: 3']
+                power_values.append(power)
+            except (KeyError, IndexError) as e:
+                st.write(f"Error processing file {file}: {e}")
+
+        dates = pd.to_datetime(dates)
+
+        if len(dates) == 0:
+            st.error(f"No data available for the selected period. Please select a different period.")
         else:
-            dates = []
-            power_values = []  
+            power_series = pd.Series(power_values, index=dates)
 
-            for file, date in file_dates:
-                df = pd.read_excel(file)
-                try:
-                    dates.append(date)
-                    power = df.iloc[32]['Unnamed: 3'] + df.iloc[33]['Unnamed: 3']
-                    power_values.append(power)
-                except (KeyError, IndexError) as e:
-                    st.write(f"Error processing file {file}: {e}")
+            total_power = power_series.sum()
+            num_months = len(power_series.resample('M').mean())
+            average_power = total_power / num_months
 
-            dates = pd.to_datetime(dates)
+            average_power_series = pd.Series([average_power] * num_months, index=power_series.resample('M').mean().index)
 
-            if selected_year != "All":
-                start_date = f'{selected_year}-{start_month:02d}-01'
-                end_date = f'{selected_year}-{end_month:02d}-01'
-                mask = (dates >= start_date) & (dates <= end_date)
-            else:
-                start_date = f'{dates.min().year}-{start_month:02d}-01'
-                end_date = f'{dates.max().year}-{end_month:02d}-01'
-                mask = (dates >= start_date) & (dates <= end_date)
+            fig = go.Figure()
 
-            filtered_dates = dates[mask]
-            filtered_power_values = [power_values[i] for i in range(len(dates)) if mask[i]]
+            fig.add_trace(go.Scatter(
+                x=power_series.index, 
+                y=power_series, 
+                mode='lines', 
+                name='Power',
+                hovertemplate='%{x|%Y-%m-%d}: %{y:,.0f}'  
+            ))
+            fig.add_trace(go.Scatter(
+                x=average_power_series.index, 
+                y=average_power_series, 
+                mode='lines', 
+                name='Average Power', 
+                line=dict(dash='dash'),
+                hovertemplate='%{y:,.0f}'
+            ))
 
-            if len(filtered_dates) == 0:
-                st.error(f"No data available for the selected period. Please select a different period.")
-            else:
-                power_series = pd.Series(filtered_power_values, index=filtered_dates)
-
-                total_power = power_series.sum()
-                num_months = len(power_series.resample('M').mean())
-                average_power = total_power / num_months
-
-                average_power_series = pd.Series([average_power] * num_months, index=power_series.resample('M').mean().index)
-
-                fig = go.Figure()
-
-                fig.add_trace(go.Scatter(
-                    x=power_series.index, 
-                    y=power_series, 
-                    mode='lines', 
-                    name='Power',
-                    hovertemplate='%{x|%Y-%m-%d}: %{y:,.0f}'  
-                ))
-                fig.add_trace(go.Scatter(
-                    x=average_power_series.index, 
-                    y=average_power_series, 
-                    mode='lines', 
-                    name='Average Power', 
-                    line=dict(dash='dash'),
-                    hovertemplate='%{y:,.0f}'
-                ))
-
-                st.plotly_chart(fig)
+            st.plotly_chart(fig)
 
         power_sum = power_series.sum()
 
