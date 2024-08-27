@@ -7,9 +7,7 @@ import plotly.graph_objects as go
 from GraphFunctions import create_fig_pie
 from GraphFunctions import plot_power_distribution
 from GraphFunctions import plot_peak_values
-from GraphFunctions import plot_peak_values_baht
 from GraphFunctions import plot_off_peak_values
-from GraphFunctions import plot_off_peak_values_baht
 from GraphFunctions import plot_power_values
 from GraphFunctions import plot_combined_power_values
 from GraphFunctions import plot_peak_power_values
@@ -20,7 +18,7 @@ from GraphFunctions import plot_combined_cost
 from GraphFunctions import plot_discount_percentage
 
 st.set_page_config(
-    page_title=" PTTOR Solar Dashboard",
+    page_title="PTTOR Solar Dashboard",
     page_icon="P_Ter_NoBG.png",
     layout="wide"
 )
@@ -37,9 +35,9 @@ st.title("Solar Project Dashboard")
 class InvalidExcelFormatException(Exception):
     pass
 
-def load_data(file):
-    data = pd.read_excel(file)
-    required_columns = ['Unnamed: 3', 'Meter: Meter 1 (อาคาร 1 และ อาคาร 2).1']
+def load_data(file, sheet_name):
+    data = pd.read_excel(file, sheet_name=sheet_name)
+    required_columns = ['Unnamed: 3']
     missing_columns = [column for column in required_columns if column not in data.columns]
     
     if missing_columns:
@@ -52,15 +50,19 @@ def load_data(file):
 uploaded_files = st.file_uploader("Choose a file", accept_multiple_files=True)
 
 if uploaded_files:
-    options = ["Pie Charts", "Total Power Distribution", "Cost", "Discount Forecasting"]
+    options = ["Pie Charts", "Total Power Distribution", "Cost", "Discount Forecasting", "Minimum Guarantee"]
     selected_option = st.selectbox("Select Attributes", options)
+
+    excel_file = pd.ExcelFile(uploaded_files[0])
+    sheet_names = excel_file.sheet_names
+    selected_sheet = st.selectbox("Select sheet for all files", sheet_names)
 
 if not uploaded_files:
     st.info("Upload a file through config")
     st.stop()
 
-def extract_date_from_excel(file):
-    df = pd.read_excel(file, header=None, nrows=1, usecols="A:B")
+def extract_date_from_excel(file, sheet_name):
+    df = pd.read_excel(file, sheet_name=sheet_name, header=None, nrows=1, usecols="A:B")
     cell_content = df.iloc[0, 0]
     date_match = re.search(r"\d{4}-\d{2}-\d{2}", cell_content)
     if date_match:
@@ -74,8 +76,8 @@ file_dates = []
 
 for file in uploaded_files:
     try:
-        data = load_data(file)
-        date = extract_date_from_excel(file)
+        data = load_data(file, selected_sheet)
+        date = extract_date_from_excel(file, selected_sheet)
         if date:
             file_dates.append((file, date))
     except InvalidExcelFormatException as e:
@@ -98,7 +100,6 @@ start_date = pd.Timestamp(year=start_year, month=start_month, day=1)
 end_date = pd.Timestamp(year=end_year, month=end_month, day=1) + pd.offsets.MonthEnd(0)
 
 filtered_file_dates = [(file, date) for file, date in file_dates if start_date <= pd.to_datetime(date) <= end_date]
-
 
 total_peak = 0
 total_off_peak = 0
@@ -124,13 +125,12 @@ discount_percentages = []
 for i, (file, date) in enumerate(filtered_file_dates):
 
     try:
-        df = load_data(file)
+        df = load_data(file, selected_sheet)
     except InvalidExcelFormatException as e:
         st.sidebar.header(file.name)
         st.sidebar.error(str(e))
         continue
 
-    df = pd.read_excel(file)
     st.sidebar.title(file.name)
     with st.sidebar.expander(f"Data Preview: {file.name}"):
         st.sidebar.dataframe(df)
@@ -142,8 +142,8 @@ for i, (file, date) in enumerate(filtered_file_dates):
             raise ValueError(f"Expected {expected_type}, but got {type(value)}")
 
     try:
-        peak = df.iloc[32]['Unnamed: 3']
-        baht_peak = df.iloc[32]['Meter: Meter 1 (อาคาร 1 และ อาคาร 2).1']
+        peak = df.iloc[32]['Unnamed: 1']
+        baht_peak = df.iloc[32]['Unnamed: 3']
         check_type(peak, (int, float))
         check_type(baht_peak, (int, float))
         st.sidebar.write(f"**Peak**: {peak:,.2f} (kWh) ({baht_peak:,.2f} Baht)")
@@ -155,11 +155,11 @@ for i, (file, date) in enumerate(filtered_file_dates):
     except (KeyError, IndexError, ValueError) as e:
         st.sidebar.write(f"**Peak**: <span style='color:red'>Missing or Invalid Type</span>", unsafe_allow_html=True)
         st.sidebar.error(f"{file.name} will be excluded because it has missing or invalid type information.")
-        continue 
+        continue
 
     try:
-        off_peak = df.iloc[33]['Unnamed: 3']
-        baht_off_peak = df.iloc[33]['Meter: Meter 1 (อาคาร 1 และ อาคาร 2).1']
+        off_peak = df.iloc[33]['Unnamed: 1']
+        baht_off_peak = df.iloc[33]['Unnamed: 3']
         check_type(off_peak, (int, float))
         check_type(baht_off_peak, (int, float))
         st.sidebar.write(f"**Off-Peak**: {off_peak:,.2f} (kWh) ({baht_off_peak:,.2f} Baht)")
@@ -184,7 +184,7 @@ for i, (file, date) in enumerate(filtered_file_dates):
         continue
 
     try:
-        peak_power = df.iloc[36]['Meter: Meter 1 (อาคาร 1 และ อาคาร 2)']
+        peak_power = df.iloc[36]['Unnamed: 1']
         check_type(peak_power, (int, float))
         st.sidebar.write(f"**Peak Power**: {peak_power:,.2f} (kW)")
         peak_power_values.append(peak_power)
@@ -194,7 +194,7 @@ for i, (file, date) in enumerate(filtered_file_dates):
         continue
 
     try:
-        electic_cost = df.iloc[39]['Meter: Meter 1 (อาคาร 1 และ อาคาร 2).1']
+        electic_cost = df.iloc[39]['Unnamed: 3']
         check_type(electic_cost, (int, float))
         st.sidebar.write(f"**Total Electric Cost**: {electic_cost:,.2f} Baht")
         total_electric_cost += electic_cost
@@ -205,8 +205,8 @@ for i, (file, date) in enumerate(filtered_file_dates):
         continue
 
     try:
-        discount = df.iloc[40]['Meter: Meter 1 (อาคาร 1 และ อาคาร 2).1']
-        discount_percent = df.iloc[40]['Unnamed: 3']
+        discount = df.iloc[40]['Unnamed: 3']
+        discount_percent = df.iloc[40]['Unnamed: 1']
         check_type(discount, (int, float))
         check_type(discount_percent, (int, float))
         discount_percent = discount_percent * 100
@@ -247,22 +247,17 @@ if uploaded_files:
     if selected_option == "Total Power Distribution":
 
         st.header(f"Total Peak: {total_peak:,.2f} (kWh)")
+        st.write(f"Total Peak in Baht: {total_peak_baht:,.2f} Baht")
         fig_peak = plot_peak_values(file_names, peak_values, [date for _, date in filtered_file_dates])
         st.plotly_chart(fig_peak)
 
-        st.header(f"Total Peak in Baht: {total_peak_baht:,.2f} (Baht)")
-        fig_peak_baht = plot_peak_values_baht(file_names, peak_baht_values, [date for _, date in filtered_file_dates])
-        st.plotly_chart(fig_peak_baht)
-
         st.header(f"Total Off-Peak: {total_off_peak:,.2f} (kWh)")
+        st.write(f"Total Off-Peak in Baht: {total_off_peak_baht:,.2f} Baht")
         fig_off_peak = plot_off_peak_values(file_names, off_peak_values, [date for _, date in filtered_file_dates])
         st.plotly_chart(fig_off_peak)
-
-        st.header(f"Total Off-Peak in Baht: {total_off_peak_baht:,.2f} (Baht)")
-        fig_off_peak_baht = plot_off_peak_values_baht(file_names, off_peak_baht_values, [date for _, date in filtered_file_dates])
-        st.plotly_chart(fig_off_peak_baht)
         
         st.header(f"Total Power: {total_power:,.2f} (kWh)")
+        st.write(f"Total Power in Baht: {total_off_peak_baht+total_peak_baht:,.2f} Baht")
         fig_power = plot_power_values(file_names, power_values, [date for _, date in filtered_file_dates])
         st.plotly_chart(fig_power)
 
@@ -354,7 +349,6 @@ if uploaded_files:
 
         power_sum = power_series.sum()
 
-
         if 0 <= power_sum <= 951700:
             discount = 13
             next_target = 951700
@@ -392,3 +386,33 @@ if uploaded_files:
         elif 951700 < power_sum <= 1163100:
             st.title("Additional power needed for all discount levels:")
             st.markdown(f"<h2>Remaining power until Level 3 (50%): <span style='font-size:40px; font-weight: bold;'>{1163100 - power_sum:,.2f} kWh</span></h2>", unsafe_allow_html=True)
+
+    if selected_option == "Minimum Guarantee":
+
+        meter_data = {}
+
+        for file in uploaded_files:
+            excel_file = pd.ExcelFile(file)
+            for sheet_name in excel_file.sheet_names:
+                df = pd.read_excel(file, sheet_name=sheet_name)
+                
+                meter_name_match = re.search(r'Meter\d+', sheet_name)
+                if meter_name_match:
+                    meter_name = meter_name_match.group(0)
+                    
+                    try:
+                        power_row = df[df.iloc[:, 0].str.contains('Power', na=False)].index[0]
+                        power_value = df.iat[power_row, 1]
+                        check_type(power_value, (int, float))
+                        
+                        if meter_name not in meter_data:
+                            meter_data[meter_name] = 0
+                        meter_data[meter_name] += power_value
+                    except (KeyError, IndexError, ValueError):
+                        st.sidebar.write(f"**{sheet_name}**: <span style='color:red'>Missing or Invalid Type</span>", unsafe_allow_html=True)
+                        st.sidebar.error(f"{file.name} - {sheet_name} will be excluded because it has missing or invalid type information.")
+                        continue
+
+        for meter_name, total_power in meter_data.items():
+            st.title(f"{meter_name}")
+            st.header(f"Total Power: {total_power:,.2f} (kWh)")
