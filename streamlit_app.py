@@ -23,6 +23,20 @@ st.set_page_config(
     layout="wide"
 )
 
+dark_mode_css = """
+<style>
+body {
+    background-color: #0e1117;
+    color: #c9d1d9;
+}
+header, .css-1d391kg, .css-1v3fvcr {
+    background-color: #161b22;
+}
+</style>
+"""
+
+st.markdown(dark_mode_css, unsafe_allow_html=True)
+
 logo_url = "ptt logo 2.png"
 
 col1, col2 = st.columns([1, 3])
@@ -141,9 +155,15 @@ for i, (file, date) in enumerate(filtered_file_dates):
         if not isinstance(value, expected_type):
             raise ValueError(f"Expected {expected_type}, but got {type(value)}")
 
+    def convert_to_number(value):
+        try:
+            return float(value.replace(',', ''))
+        except (ValueError, AttributeError):
+            return value
+
     try:
-        peak = df.iloc[32]['Unnamed: 1']
-        baht_peak = df.iloc[32]['Unnamed: 3']
+        peak = convert_to_number(df.iloc[32]['Unnamed: 1'])
+        baht_peak = convert_to_number(df.iloc[32]['Unnamed: 3'])
         check_type(peak, (int, float))
         check_type(baht_peak, (int, float))
         st.sidebar.write(f"**Peak**: {peak:,.2f} (kWh) ({baht_peak:,.2f} Baht)")
@@ -154,12 +174,12 @@ for i, (file, date) in enumerate(filtered_file_dates):
         file_names.append(file.name) 
     except (KeyError, IndexError, ValueError) as e:
         st.sidebar.write(f"**Peak**: <span style='color:red'>Missing or Invalid Type</span>", unsafe_allow_html=True)
-        st.sidebar.error(f"{file.name} will be excluded because it has missing or invalid type information.")
+        st.sidebar.error(f"{str(e)}")
         continue
 
     try:
-        off_peak = df.iloc[33]['Unnamed: 1']
-        baht_off_peak = df.iloc[33]['Unnamed: 3']
+        off_peak = convert_to_number(df.iloc[33]['Unnamed: 1'])
+        baht_off_peak = convert_to_number(df.iloc[33]['Unnamed: 3'])
         check_type(off_peak, (int, float))
         check_type(baht_off_peak, (int, float))
         st.sidebar.write(f"**Off-Peak**: {off_peak:,.2f} (kWh) ({baht_off_peak:,.2f} Baht)")
@@ -184,7 +204,7 @@ for i, (file, date) in enumerate(filtered_file_dates):
         continue
 
     try:
-        peak_power = df.iloc[36]['Unnamed: 1']
+        peak_power = convert_to_number(df.iloc[36]['Unnamed: 1'])
         check_type(peak_power, (int, float))
         st.sidebar.write(f"**Peak Power**: {peak_power:,.2f} (kW)")
         peak_power_values.append(peak_power)
@@ -194,7 +214,7 @@ for i, (file, date) in enumerate(filtered_file_dates):
         continue
 
     try:
-        electic_cost = df.iloc[39]['Unnamed: 3']
+        electic_cost = convert_to_number(df.iloc[39]['Unnamed: 3'])
         check_type(electic_cost, (int, float))
         st.sidebar.write(f"**Total Electric Cost**: {electic_cost:,.2f} Baht")
         total_electric_cost += electic_cost
@@ -205,8 +225,8 @@ for i, (file, date) in enumerate(filtered_file_dates):
         continue
 
     try:
-        discount = df.iloc[40]['Unnamed: 3']
-        discount_percent = df.iloc[40]['Unnamed: 1']
+        discount = convert_to_number(df.iloc[40]['Unnamed: 3'])
+        discount_percent = convert_to_number(df.iloc[40]['Unnamed: 1'])
         check_type(discount, (int, float))
         check_type(discount_percent, (int, float))
         discount_percent = discount_percent * 100
@@ -388,31 +408,67 @@ if uploaded_files:
             st.markdown(f"<h2>Remaining power until Level 3 (50%): <span style='font-size:40px; font-weight: bold;'>{1163100 - power_sum:,.2f} kWh</span></h2>", unsafe_allow_html=True)
 
     if selected_option == "Minimum Guarantee":
+        st.title("Minimum Guarantee")
 
         meter_data = {}
+        user_minimum_guarantees = {}
 
         for file in uploaded_files:
             excel_file = pd.ExcelFile(file)
             for sheet_name in excel_file.sheet_names:
                 df = pd.read_excel(file, sheet_name=sheet_name)
                 
-                meter_name_match = re.search(r'Meter\d+', sheet_name)
+                meter_name_match = re.search(r'Meter\s?\d+', sheet_name)
                 if meter_name_match:
                     meter_name = meter_name_match.group(0)
                     
                     try:
-                        power_row = df[df.iloc[:, 0].str.contains('Power', na=False)].index[0]
-                        power_value = df.iat[power_row, 1]
-                        check_type(power_value, (int, float))
+                        peak = df.iloc[32]['Unnamed: 1']
+                        off_peak = df.iloc[33]['Unnamed: 1']
+                        check_type(peak, (int, float))
+                        check_type(off_peak, (int, float))
+                        power_value = peak + off_peak
                         
                         if meter_name not in meter_data:
                             meter_data[meter_name] = 0
                         meter_data[meter_name] += power_value
-                    except (KeyError, IndexError, ValueError):
-                        st.sidebar.write(f"**{sheet_name}**: <span style='color:red'>Missing or Invalid Type</span>", unsafe_allow_html=True)
-                        st.sidebar.error(f"{file.name} - {sheet_name} will be excluded because it has missing or invalid type information.")
+                    except (KeyError, IndexError, ValueError) as e:
+                        st.write(f"**{sheet_name}**: <span style='color:red'>Missing or Invalid Type</span>", unsafe_allow_html=True)
+                        st.error(f"{file.name} - {sheet_name} will be excluded because it has missing or invalid type information. Error: {str(e)}")
                         continue
 
-        for meter_name, total_power in meter_data.items():
-            st.title(f"{meter_name}")
-            st.header(f"Total Power: {total_power:,.2f} (kWh)")
+        if meter_data:
+            for meter_name, total_power in meter_data.items():
+                st.title(f"{meter_name}")
+                st.header(f"Total Power: {total_power:,.2f} (kWh)")
+                
+                minimum_guarantee = st.number_input(
+                    f"Enter Minimum Guarantee for {meter_name}",
+                    min_value=0.0,
+                    format="%.2f"
+                )
+                user_minimum_guarantees[meter_name] = minimum_guarantee
+                
+                if minimum_guarantee > 0:
+                    missing_power = max(0, minimum_guarantee - total_power)
+                    st.write(f"Missing to complete Minimum Guarantee: <span style='font-size:20px; font-weight:bold;'>{missing_power:,.2f} (kWh)</span>", unsafe_allow_html=True)
+                    
+                    if total_power >= minimum_guarantee:
+                        st.write(f"Goal has been reached for {meter_name}!")
+                        progress = 1.0
+                    else:
+                        progress = total_power / minimum_guarantee
+                    
+                    st.write(f"{meter_name} Progress: {total_power:,.2f} / {minimum_guarantee:,.2f} kWh")
+                    st.progress(progress)
+                else:
+                    st.write(f"Please enter a valid minimum guarantee for {meter_name}.")
+        else:
+            st.write("No valid meter data found.")
+
+
+
+
+
+
+
