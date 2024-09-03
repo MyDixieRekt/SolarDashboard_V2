@@ -64,11 +64,12 @@ def load_data(file, sheet_name):
 uploaded_files = st.file_uploader("Choose a file", accept_multiple_files=True)
 
 if uploaded_files:
-    options = ["Pie Charts", "Total Power Distribution", "Cost", "Discount Forecasting", "Minimum Guarantee"]
+    options = ["Pie Charts", "Total Power Distribution", "Cost", "Discount", "Minimum Guarantee", "All Meters"]
     selected_option = st.selectbox("Select Attributes", options)
 
     excel_file = pd.ExcelFile(uploaded_files[0])
     sheet_names = excel_file.sheet_names
+
     selected_sheet = st.selectbox("Select sheet for all files", sheet_names)
 
 if not uploaded_files:
@@ -295,6 +296,17 @@ if uploaded_files:
         fig_e_cost = plot_electrical_cost(file_names, e_cost_values, [date for _, date in filtered_file_dates])
         st.plotly_chart(fig_e_cost)
 
+        st.header(f"Total Net Electric Cost: {total_net_electric_cost:,.2f} (Baht)")
+        st.write("(Electric Cost - Discount)")
+        fig_net_e_cost = plot_net_electric_cost(file_names, net_e_cost_values, [date for _, date in filtered_file_dates])
+        st.plotly_chart(fig_net_e_cost)
+
+        st.header("Electric Cost, Discount, and Net Electric Cost")
+        fig_combined_cost = plot_combined_cost(file_names, e_cost_values, discount_values, net_e_cost_values, [date for _, date in filtered_file_dates])
+        st.plotly_chart(fig_combined_cost)
+
+    if selected_option == "Discount":
+
         st.header(f"Total Discount: {total_discount:,.2f} (Baht)")
         fig_discount = plot_discount_values(file_names, discount_values, [date for _, date in filtered_file_dates])
         st.plotly_chart(fig_discount)
@@ -303,109 +315,6 @@ if uploaded_files:
         fig_discount_percentage = plot_discount_percentage(file_names, discount_percentages, [date for _, date in filtered_file_dates])
         st.plotly_chart(fig_discount_percentage)
 
-        st.header(f"Total Net Electric Cost: {total_net_electric_cost:,.2f} (Baht)")
-        fig_net_e_cost = plot_net_electric_cost(file_names, net_e_cost_values, [date for _, date in filtered_file_dates])
-        st.plotly_chart(fig_net_e_cost)
-
-        st.header("Electric Cost, Discount, and Net Electric Cost")
-        fig_combined_cost = plot_combined_cost(file_names, e_cost_values, discount_values, net_e_cost_values, [date for _, date in filtered_file_dates])
-        st.plotly_chart(fig_combined_cost)
-
-    if selected_option == "Discount Forecasting":
-        st.title("Discount Forecasting")
-
-        dates = []
-        power_values = []  
-
-        for file, date in filtered_file_dates:
-            df = pd.read_excel(file)
-            try:
-                if pd.notna(df.iloc[32]['Unnamed: 3']) and pd.notna(df.iloc[33]['Unnamed: 3']):
-                    power_32 = df.iloc[32]['Unnamed: 3']
-                    power_33 = df.iloc[33]['Unnamed: 3']
-                    if isinstance(power_32, (int, float)) and isinstance(power_33, (int, float)):
-                        dates.append(date)
-                        power = power_32 + power_33
-                        power_values.append(power)
-                    else:
-                        st.write(f"**:red[File {file.name} has non-numeric values in required cells.]**")
-                else:
-                    st.write(f"**:red[File {file.name} has missing values in required cells.]**")
-            except (KeyError, IndexError) as e:
-                st.write(f"**:red[Error processing file {file.name}: {e}]**")
-
-        dates = pd.to_datetime(dates)
-
-        if len(dates) == 0:
-            st.write("**:red[No data available for the selected period. Please select a different period.]**")
-        else:
-            power_series = pd.Series(power_values, index=dates)
-
-            total_power = power_series.sum()
-            num_months = len(power_series.resample('M').mean())
-            average_power = total_power / num_months
-
-            average_power_series = pd.Series([average_power] * num_months, index=power_series.resample('M').mean().index)
-
-            fig = go.Figure()
-
-            fig.add_trace(go.Scatter(
-                x=power_series.index, 
-                y=power_series, 
-                mode='lines', 
-                name='Power',
-                hovertemplate='%{x|%Y-%m-%d}: %{y:,.0f}'  
-            ))
-            fig.add_trace(go.Scatter(
-                x=average_power_series.index, 
-                y=average_power_series, 
-                mode='lines', 
-                name='Average Power', 
-                line=dict(dash='dash'),
-                hovertemplate='%{y:,.0f}'
-            ))
-
-            st.plotly_chart(fig)
-
-        power_sum = power_series.sum()
-
-        if 0 <= power_sum <= 951700:
-            discount = 13
-            next_target = 951700
-            next_discount = 100
-            additional_power_needed = next_target - power_sum
-            level = 1
-        elif 951700 < power_sum <= 1163100:
-            discount = 100
-            next_target = 1163100
-            next_discount = 50
-            additional_power_needed = next_target - power_sum
-            level = 2
-        elif 1163100 < power_sum <= 1353000:
-            discount = 50
-            next_target = 1353000
-            next_discount = 0
-            additional_power_needed = next_target - power_sum
-            level = 3
-        else:
-            discount = 0
-            next_target = None
-            next_discount = None
-            additional_power_needed = None
-            level = 0
-
-        st.header(f"The total power consumption is: ")
-        st.title(f"{power_sum:,.2f} kWh")
-        st.header(f"The customer is eligible for: ")
-        st.title(f"Level {level} ({discount})%")
-
-        if power_sum <= 951700:
-            st.title("Additional power needed for all discount levels:")
-            st.markdown(f"<h2>Remaining power until Level 2 (100%): <span style='font-size:40px; font-weight: bold;'>{951700 - power_sum:,.2f} kWh</span></h2>", unsafe_allow_html=True)
-            st.markdown(f"<h2>Remaining power until Level 3 (50%): <span style='font-size:40px; font-weight: bold;'>{1163100 - power_sum:,.2f} kWh</span></h2>", unsafe_allow_html=True)
-        elif 951700 < power_sum <= 1163100:
-            st.title("Additional power needed for all discount levels:")
-            st.markdown(f"<h2>Remaining power until Level 3 (50%): <span style='font-size:40px; font-weight: bold;'>{1163100 - power_sum:,.2f} kWh</span></h2>", unsafe_allow_html=True)
 
     if selected_option == "Minimum Guarantee":
         st.title("Minimum Guarantee")
@@ -465,6 +374,101 @@ if uploaded_files:
                     st.write(f"Please enter a valid minimum guarantee for {meter_name}.")
         else:
             st.write("No valid meter data found.")
+
+    if selected_option == "All Meters":
+        meter_summaries = {}
+        total_peak = 0
+        total_off_peak = 0
+        total_power = 0
+        total_electric_cost = 0
+        total_discount = 0
+        total_net_electric_cost = 0
+        total_peak_baht = 0
+        total_off_peak_baht = 0
+
+        for file, date in filtered_file_dates:  # Use filtered files
+            excel_file = pd.ExcelFile(file)
+            for sheet_name in excel_file.sheet_names:
+                try:
+                    df = pd.read_excel(file, sheet_name=sheet_name)
+                    
+                    meter_name_match = re.search(r'Meter\s?\d+', sheet_name)
+                    if meter_name_match:
+                        meter_name = meter_name_match.group(0)
+                        if meter_name not in meter_summaries:
+                            meter_summaries[meter_name] = {
+                                'peak': 0,
+                                'off_peak': 0,
+                                'power': 0,
+                                'electric_cost': 0,
+                                'discount': 0,
+                                'net_electric_cost': 0,
+                                'peak_baht': 0,
+                                'off_peak_baht': 0
+                            }
+
+                        peak = convert_to_number(df.iloc[32]['Unnamed: 1'])
+                        baht_peak = convert_to_number(df.iloc[32]['Unnamed: 3'])
+                        check_type(peak, (int, float))
+                        check_type(baht_peak, (int, float))
+                        meter_summaries[meter_name]['peak'] += peak
+                        meter_summaries[meter_name]['peak_baht'] += baht_peak
+
+                        off_peak = convert_to_number(df.iloc[33]['Unnamed: 1'])
+                        baht_off_peak = convert_to_number(df.iloc[33]['Unnamed: 3'])
+                        check_type(off_peak, (int, float))
+                        check_type(baht_off_peak, (int, float))
+                        meter_summaries[meter_name]['off_peak'] += off_peak
+                        meter_summaries[meter_name]['off_peak_baht'] += baht_off_peak
+
+                        power = peak + off_peak
+                        check_type(power, (int, float))
+                        meter_summaries[meter_name]['power'] += power
+
+                        electic_cost = convert_to_number(df.iloc[39]['Unnamed: 3'])
+                        check_type(electic_cost, (int, float))
+                        meter_summaries[meter_name]['electric_cost'] += electic_cost
+
+                        discount = convert_to_number(df.iloc[40]['Unnamed: 3'])
+                        check_type(discount, (int, float))
+                        meter_summaries[meter_name]['discount'] += discount
+
+                        net_electric_cost = electic_cost - discount
+                        check_type(net_electric_cost, (int, float))
+                        meter_summaries[meter_name]['net_electric_cost'] += net_electric_cost
+
+                        total_peak += peak
+                        total_peak_baht += baht_peak
+                        total_off_peak += off_peak
+                        total_off_peak_baht += baht_off_peak
+                        total_power += power
+                        total_electric_cost += electic_cost
+                        total_discount += discount
+                        total_net_electric_cost += net_electric_cost
+
+                except (KeyError, IndexError, ValueError) as e:
+                    st.sidebar.write(f"**{sheet_name}**: <span style='color:red'>Missing or Invalid Type</span>", unsafe_allow_html=True)
+                    st.sidebar.error(f"{file.name} - {sheet_name} will be excluded because it has missing or invalid type information. Error: {str(e)}")
+                    continue
+
+        st.header("All Meters Summary")
+        st.write(f"**Total Peak**: {total_peak:,.2f} kWh ({total_peak_baht:,.2f} Baht)")                            
+        st.write(f"**Total Off-Peak**: {total_off_peak:,.2f} kWh ({total_off_peak_baht:,.2f} Baht)")
+        st.write(f"**Total Power**: {total_power:,.2f} kWh")
+        st.write(f"**Total Electric Cost**: {total_electric_cost:,.2f} Baht")
+        st.write(f"**Total Discount**: {total_discount:,.2f} Baht")
+        st.write(f"**Total Net Electric Cost**: {total_net_electric_cost:,.2f} Baht")
+
+        for meter_name, summary in meter_summaries.items():
+            st.header(f"{meter_name} Summary")
+            st.write(f"**Peak**: {summary['peak']:,.2f} kWh ({summary['peak_baht']:,.2f} Baht)")
+            st.write(f"**Off-Peak**: {summary['off_peak']:,.2f} kWh ({summary['off_peak_baht']:,.2f} Baht)")
+            st.write(f"**Power**: {summary['power']:,.2f} kWh")
+            st.write(f"**Electric Cost**: {summary['electric_cost']:,.2f} Baht")
+            st.write(f"**Discount**: {summary['discount']:,.2f} Baht")
+            st.write(f"**Net Electric Cost**: {summary['net_electric_cost']:,.2f} Baht")
+
+
 
 
 
