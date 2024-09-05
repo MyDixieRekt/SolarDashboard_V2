@@ -72,39 +72,44 @@ if uploaded_files:
 
     selected_sheet = st.selectbox("Select sheet for all files", sheet_names)
 
-if not uploaded_files:
+    def extract_date_from_excel(file, sheet_name):
+        df = pd.read_excel(file, sheet_name=sheet_name, header=None, nrows=1, usecols="A:B")
+        cell_content = df.iloc[0, 0]
+        date_match = re.search(r"\d{4}-\d{2}-\d{2}", cell_content)
+        if date_match:
+            date = pd.to_datetime(date_match.group(0))
+            formatted_date = date.strftime('%Y-%m-%d')
+            return formatted_date
+        else:
+            return None
+
+    file_dates = []
+    date_tracker = {}
+
+    for file in uploaded_files:
+        try:
+            data = load_data(file, selected_sheet)
+            date = extract_date_from_excel(file, selected_sheet)
+            if date:
+                file_dates.append((file, date))
+                if date in date_tracker:
+                    date_tracker[date].append(file.name)
+                else:
+                    date_tracker[date] = [file.name]
+        except InvalidExcelFormatException as e:
+            st.sidebar.header(file.name)
+            st.sidebar.error(f"{file.name} will be excluded because the format does not match.")
+            continue
+
+    file_dates = natsorted(file_dates, key=lambda x: x[1])
+
+    dates = [pd.to_datetime(date) for _, date in file_dates]
+    years = sorted(set(date.year for date in dates))
+    months = list(range(1, 13))
+
+else:
     st.info("Upload a file through config")
     st.stop()
-
-def extract_date_from_excel(file, sheet_name):
-    df = pd.read_excel(file, sheet_name=sheet_name, header=None, nrows=1, usecols="A:B")
-    cell_content = df.iloc[0, 0]
-    date_match = re.search(r"\d{4}-\d{2}-\d{2}", cell_content)
-    if date_match:
-        date = pd.to_datetime(date_match.group(0))
-        formatted_date = date.strftime('%Y-%m-%d')
-        return formatted_date
-    else:
-        return None
-
-file_dates = []
-
-for file in uploaded_files:
-    try:
-        data = load_data(file, selected_sheet)
-        date = extract_date_from_excel(file, selected_sheet)
-        if date:
-            file_dates.append((file, date))
-    except InvalidExcelFormatException as e:
-        st.sidebar.header(file.name)
-        st.sidebar.error(f"{file.name} will be excluded because the format does not match.")
-        continue
-
-file_dates = natsorted(file_dates, key=lambda x: x[1])
-
-dates = [pd.to_datetime(date) for _, date in file_dates]
-years = sorted(set(date.year for date in dates))
-months = list(range(1, 13))
 
 start_year = st.selectbox("Select Start Year", years)
 start_month = st.selectbox("Select Start Month", months)
@@ -115,6 +120,17 @@ start_date = pd.Timestamp(year=start_year, month=start_month, day=1)
 end_date = pd.Timestamp(year=end_year, month=end_month, day=1) + pd.offsets.MonthEnd(0)
 
 filtered_file_dates = [(file, date) for file, date in file_dates if start_date <= pd.to_datetime(date) <= end_date]
+
+# Check for duplicate dates and display warnings after the date selection
+duplicate_dates = {date: files for date, files in date_tracker.items() if len(files) > 1}
+
+if duplicate_dates:
+    st.warning("Warning: Duplicate dates found in the uploaded files!")
+    for date, files in duplicate_dates.items():
+        st.write(f"Date: {pd.to_datetime(date).strftime('%Y-%m-%d')}")
+        st.write("Files:")
+        for file in files:
+            st.write(f"- {file}")
 
 total_peak = 0
 total_off_peak = 0
@@ -346,6 +362,8 @@ if uploaded_files:
                         st.error(f"{file.name} - {sheet_name} will be excluded because it has missing or invalid type information. Error: {str(e)}")
                         continue
 
+        total_power_all_meters = sum(meter_data.values())
+
         if meter_data:
             for meter_name, total_power in meter_data.items():
                 st.title(f"{meter_name}")
@@ -372,6 +390,30 @@ if uploaded_files:
                     st.progress(progress)
                 else:
                     st.write(f"Please enter a valid minimum guarantee for {meter_name}.")
+            
+            st.title("All Meters")
+            st.header(f"Total Power: {total_power_all_meters:,.2f} (kWh)")
+            
+            all_meters_minimum_guarantee = st.number_input(
+                "Enter Minimum Guarantee for All Meters",
+                min_value=0.0,
+                format="%.2f"
+            )
+            
+            if all_meters_minimum_guarantee > 0:
+                missing_power_all_meters = max(0, all_meters_minimum_guarantee - total_power_all_meters)
+                st.write(f"Missing to complete Minimum Guarantee: <span style='font-size:20px; font-weight:bold;'>{missing_power_all_meters:,.2f} (kWh)</span>", unsafe_allow_html=True)
+                
+                if total_power_all_meters >= all_meters_minimum_guarantee:
+                    st.write("Goal has been reached for All Meters!")
+                    progress_all_meters = 1.0
+                else:
+                    progress_all_meters = total_power_all_meters / all_meters_minimum_guarantee
+                
+                st.write(f"All Meters Progress: {total_power_all_meters:,.2f} / {all_meters_minimum_guarantee:,.2f} kWh")
+                st.progress(progress_all_meters)
+            else:
+                st.write("Please enter a valid minimum guarantee for All Meters.")
         else:
             st.write("No valid meter data found.")
 
@@ -386,7 +428,7 @@ if uploaded_files:
         total_peak_baht = 0
         total_off_peak_baht = 0
 
-        for file, date in filtered_file_dates:  # Use filtered files
+        for file, date in filtered_file_dates:  
             excel_file = pd.ExcelFile(file)
             for sheet_name in excel_file.sheet_names:
                 try:
@@ -468,6 +510,25 @@ if uploaded_files:
             st.write(f"**Discount**: {summary['discount']:,.2f} Baht")
             st.write(f"**Net Electric Cost**: {summary['net_electric_cost']:,.2f} Baht")
 
+        categories = ['Peak', 'Off Peak', 'Power', 'Electric Cost', 'Discount', 'Net Electric Cost']
+        fig = go.Figure()
+
+        for meter_name, summary in meter_summaries.items():
+            fig.add_trace(go.Bar(
+                x=categories,
+                y=[summary['peak'], summary['off_peak'], summary['power'], summary['electric_cost'], summary['discount'], summary['net_electric_cost']],
+                name=meter_name,
+                hovertemplate='%{y:,}'
+            ))
+
+        fig.update_layout(
+            title='Comparison of Meters',
+            xaxis_title='Categories',
+            yaxis_title='Values',
+            barmode='group'
+        )
+
+        st.plotly_chart(fig)
 
 
 

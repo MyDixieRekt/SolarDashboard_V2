@@ -323,3 +323,10 @@ def plot_combined_cost(file_names, e_cost_values, discount_values, net_e_cost_va
     )
 
     return fig_combined_cost
+
+def create_bar_chart(title, labels, values):
+    fig = go.Figure(data=[
+        go.Bar(name=label, x=[label], y=[value]) for label, value in zip(labels, values)
+    ])
+    fig.update_layout(title=title, barmode='group')
+    return fig
