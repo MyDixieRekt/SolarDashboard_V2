@@ -107,6 +107,20 @@ if uploaded_files:
     years = sorted(set(date.year for date in dates))
     months = list(range(1, 13))
 
+    # Calculate missing months and display full months with missing ones highlighted in red
+    for year in years:
+        year_dates = [date for date in dates if date.year == year]
+        year_months = sorted(set(date.month for date in year_dates))
+        missing_months = [month for month in months if month not in year_months]
+        
+        st.sidebar.header(f"Months for {year}")
+        cols = st.sidebar.columns(12)
+        for i, month in enumerate(months):
+            if month in missing_months:
+                cols[i].markdown(f"<span style='color:red'>{month}</span>", unsafe_allow_html=True)
+            else:
+                cols[i].write(month)
+
 else:
     st.info("Upload a file through config")
     st.stop()
@@ -529,11 +543,4 @@ if uploaded_files:
         )
 
         st.plotly_chart(fig)
-
-
-
-
-
-
-
 
